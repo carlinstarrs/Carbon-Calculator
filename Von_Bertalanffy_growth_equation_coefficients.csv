@@ -1,0 +1,13 @@
+Veg_Type,Owner_Type,Coefficient_a,Coefficient_b,Std_Error,Num_FIA_Plots_COLE2
+Mixed Conifer,All_CMC,168.03,0.02,120.14,1374
+Mixed Conifer,Pvt_CMC,110.94,0.04,77.91,351
+Mixed Conifer,CMC_Poor_or_Nonstocked,39.64,0.04,27.97,241
+Ponderosa Pine,All_CMC,87.84,0.04,76.4,263
+Ponderosa Pine,Pvt_CMC,80.13,0.05,59.19,101
+Ponderosa Pine,CMC_Poor_or_Nonstocked,39.64,0.04,27.97,241
+Redwood,All_CMC,464.55,0.02,395.08,118
+Redwood,Pvt_CMC,327.08,0.03,156.74,95
+Redwood,CMC_Poor_or_Nonstocked,40.18,0.11,31.41,21
+Douglas-fir,All_CMC,255.77,0.03,155,187
+Douglas-fir,Pvt_CMC,200.85,0.05,119.78,112
+Douglas-fir,CMC_Poor_or_Nonstocked,40.18,0.11,31.41,21
