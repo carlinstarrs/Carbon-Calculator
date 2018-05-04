@@ -3,6 +3,7 @@ options(scipen = 999)
 library(dplyr)
 library(ggplot2)
 library(reshape2)
+library(gridExtra)
 library(shiny)
 library(rsconnect)
 
@@ -64,49 +65,24 @@ flows$Hayes_2012[flows$Hayes_2012 < 0] <- 0
 
 #Grow Stand
 
-# thin.year <- 40
-# harvest.year <- 80
-# 
-# 
-# #Thin percentage of total live biomass
-# thin.pct.total.live <- 0.4
-# 
-# #Logging - Default 0.75 used, 0.25 unused logging residues left to decompose on site. 
-# #All unused is like burning all residues
-# logging.residue.bioenergy.used <- 0 
-# logging.residue.products.used <- 0
-# logging.residue.unused <- 1
-# 
-# #Thinning - Based on partial thinnings (72% chips, 28% sawlogs) in Stewart and Nakamura (2012)
-# thinning.residue.bioenergy.used <- 0.72
-# thinning.residue.products.used <- 0.28
-# thinning.residue.unused <- 0
-# 
-# #Sawmill - Default 0.24 usedfor energy,  0.75 into products, 0.01 waste
-# sawmill.residue.bioenergy.used <- 0.24
-# sawmill.residue.products.used <- 0.75
-# sawmill.residue.unused <- 0.01
-# 
-# #Substitution - 57% of wood products go into buildings where substitution benefits 
-# #are significant (FPL-GTR-199, McKeever 2011)
-# substitution.wood.products <- 0.57
-# substitution.unused <- 0.43
-
-thin.year <- c(40,120)
-harvest.year <- c(80, 160)
+thin.year <- 40
+harvest.year <- 80
 max.year <- 240
 forest.type <-  "Mixed Conifer"
 
-create_growth_table <- function(forest.type, thin.year, harvest.year, max.year, thin.pct.total.live, 
+create_growth_table <- function(forest.type, even.aged, thin.year, harvest.year, max.year, thin.pct.total.live, 
                                 logging.residue.bioenergy.used, logging.residue.products.used, logging.residue.unused,
                                 thinning.residue.bioenergy.used, thinning.residue.products.used, thinning.residue.unused, 
                                 sawmill.residue.bioenergy.used, sawmill.residue.products.used, sawmill.residue.unused,
                                 substitution.wood.products, substitution.unused) {
   
+  
+  if(missing(even.aged)) {
+    even.aged <- TRUE
+  }
   if(missing(thin.pct.total.live)) {
     thin.pct.total.live <- 0.4
   }
-  
   if(missing(logging.residue.bioenergy.used)) {
     logging.residue.bioenergy.used <- 0.75
   }
@@ -148,91 +124,115 @@ create_growth_table <- function(forest.type, thin.year, harvest.year, max.year, 
   growth_table <- data.frame("Project Year" = -80:160, "Year" = 0:max.year)
   growth_table$Let_Grow_Forest_Mg_per_ha <- growth$Coefficient_a[growth$Veg_Type == forest.type & growth$Owner_Type == "All_CMC"] * (1 - exp(-growth$Coefficient_b[growth$Veg_Type == forest.type & growth$Owner_Type == "All_CMC"] * growth_table$Year))^3
   
-  thin.schedule <- data.frame("Year" = thin.year)
-  thin.schedule$Activity <- "Thin"
+  if(even.aged == TRUE) {
+    harvest.schedule <- data.frame("Year" = c(harvest.year, harvest.year * 2))
+    harvest.schedule$Activity <- "Harvest"
+  } else {
+    thin.year <- 40
+    cycles <- max.year%/%20
+    cycles <- 20 * (1:cycles)
+    cycles <- cycles[cycles > harvest.year]
+    harvest.schedule <- data.frame("Year" = c(harvest.year, cycles[1:(length(cycles) - 1)]))
+    harvest.schedule$Activity <- "Harvest"
+  }
   
-  harvest.schedule <- data.frame("Year" = c(harvest.year, harvest.year * 2))
-  harvest.schedule$Activity <- "Harvest"
-  
-  cycle.table <- rbind(thin.schedule, harvest.schedule)
+  if(!is.na(thin.year)) {
+    thin.schedule <- data.frame("Year" = thin.year)
+    thin.schedule$Activity <- "Thin"
+    cycle.table <- rbind(thin.schedule, harvest.schedule)
+  } else {
+    cycle.table <- harvest.schedule
+  }
   cycle.table <- cycle.table[order(cycle.table$Year),]
   
   harvest.cycles <- cycle.table$Year[cycle.table$Activity == "Harvest"]
-  regen.table <- data.frame("Project Year" = -80:160, "Year" = 0:max.year)
-  regen.table$Regenerated_Forest <- NA
-  # regen.table$Regenerated_Forest[0:which(regen.table$Year == harvest.cycles[1])] <- growth$Coefficient_a[growth$Veg_Type == forest.type & growth$Owner_Type == "All_CMC"] * (1 - exp(-growth$Coefficient_b[growth$Veg_Type == forest.type & growth$Owner_Type == "All_CMC"] * regen.table$Year[0:which(regen.table$Year == harvest.cycles[1])]))^3
-  
-  for (i in 1:length(harvest.cycles)) {
-    if (!is.na(harvest.cycles[i + 1])) {
-      end <- harvest.cycles[i+1] + 1
-    } else {
-      end <- max.year
+
+  thin <- function(year, even.aged) {
+    if(missing(even.aged)) {
+      even.aged <- TRUE
     }
-    if(i == 1) {
-      regen.table$Regenerated_Forest[which(regen.table$Year == harvest.cycles[i]):which(regen.table$Year == end)] <- growth$Coefficient_a[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * (1 - exp(-growth$Coefficient_b[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * growth_table$Year[1:length(regen.table$Regenerated_Forest[which(regen.table$Year == harvest.cycles[i]):which(regen.table$Year == end)])]))^3
-    } else {
-      regen.table$Regenerated_Forest[which(regen.table$Year == (harvest.cycles[i] + 1)):which(regen.table$Year == end)] <- growth$Coefficient_a[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * (1 - exp(-growth$Coefficient_b[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * growth_table$Year[1:length(regen.table$Regenerated_Forest[which(regen.table$Year == (harvest.cycles[i] + 1)):which(regen.table$Year == end)])]))^3
-    }
-  }
-  
-  #output <- growth_table[0:which(growth_table$Year == cycle.table$Year[1]),]
-  
-  # year <- cycle.table$Year[1]
-  
-  if (!is.na(thin.year)) {
-    thin <- function(year) {
+    if(even.aged == TRUE) {
       data <- growth_table[which(growth_table$Year == year): (which(growth_table$Year == year) + 120),]
       last.mg.ha <- data$Let_Grow_Forest_Mg_per_ha[1]
       data$Let_Grow_Forest_Mg_per_ha[2] <- growth_table$Let_Grow_Forest_Mg_per_ha[growth_table$Year == data$Year[2]] - thin.pct.total.live * data$Let_Grow_Forest_Mg_per_ha[1]
       for (i in 3:41) {
         data$Let_Grow_Forest_Mg_per_ha[i] <- data$Let_Grow_Forest_Mg_per_ha[i-1] + (growth_table$Let_Grow_Forest_Mg_per_ha[growth_table$Year == data$Year[41]] - data$Let_Grow_Forest_Mg_per_ha[2])/39
       }
-      data$Logging_Slash_Left<- (thin.pct.total.live * last.mg.ha * 0.72) * logging.residue.unused * flows$Logging_Residue_Slash[1:nrow(data)]/100
-      data$Energy_from_logging_residues <- (thin.pct.total.live *last.mg.ha * 0.72) * logging.residue.bioenergy.used
-      data$Energy_from_sawmill_residues <- (thin.pct.total.live *last.mg.ha * 0.28) * sawmill.residue.bioenergy.used
-      data$Wood_Products <- (thin.pct.total.live *last.mg.ha * 0.28) * sawmill.residue.products.used * flows$Wood_Products_In_Use[1:nrow(data)]/100
-      data$Landfill <- (thin.pct.total.live *last.mg.ha * 0.28) * sawmill.residue.products.used * flows$Permanent_Landfill_Storage[1:nrow(data)]/100
-      data$Energy_from_post_consumer_residues <- (thin.pct.total.live *last.mg.ha * 0.28) * sawmill.residue.products.used * flows$Accumulated_Post_Consumer_Energy[1:nrow(data)]/100
-      data$Substitution_Benefits  <-data$Wood_Products[1] * substitution.wood.products
-      data$Activity <- paste("Thin @ Year", year)
-      
-      return(data)
+    } else {
+      data <- growth_table
+      last.mg.ha <- data$Let_Grow_Forest_Mg_per_ha[which(data$Year == year)]
+      data$Let_Grow_Forest_Mg_per_ha[(which(data$Year == year) + 1)] <- growth_table$Let_Grow_Forest_Mg_per_ha[growth_table$Year == data$Year[(which(data$Year == year) + 1)]] - thin.pct.total.live * data$Let_Grow_Forest_Mg_per_ha[which(data$Year == year)]
+      for (i in (which(data$Year == year) + 2):(which(data$Year == year) + 40)) {
+        data$Let_Grow_Forest_Mg_per_ha[i] <- data$Let_Grow_Forest_Mg_per_ha[i-1] + (growth_table$Let_Grow_Forest_Mg_per_ha[growth_table$Year == (which(data$Year == year) + 39)] - data$Let_Grow_Forest_Mg_per_ha[(which(data$Year == year) + 1)])/39
+      }
+      data2 <- data[which(data$Year == 0):which(data$Year == year),]
+      data <- data[which(data$Year >= year),]
     }
     
-    thinned <- thin(thin.year[1])
+    data$Logging_Slash_Left<- (thin.pct.total.live * last.mg.ha * 0.72) * logging.residue.unused * flows$Logging_Residue_Slash[1:nrow(data)]/100
+    data$Energy_from_logging_residues <- (thin.pct.total.live *last.mg.ha * 0.72) * logging.residue.bioenergy.used
+    data$Energy_from_sawmill_residues <- (thin.pct.total.live *last.mg.ha * 0.28) * sawmill.residue.bioenergy.used
+    data$Wood_Products <- (thin.pct.total.live *last.mg.ha * 0.28) * sawmill.residue.products.used * flows$Wood_Products_In_Use[1:nrow(data)]/100
+    data$Landfill <- (thin.pct.total.live *last.mg.ha * 0.28) * sawmill.residue.products.used * flows$Permanent_Landfill_Storage[1:nrow(data)]/100
+    data$Energy_from_post_consumer_residues <- (thin.pct.total.live *last.mg.ha * 0.28) * sawmill.residue.products.used * flows$Accumulated_Post_Consumer_Energy[1:nrow(data)]/100
+    data$Substitution_Benefits  <-data$Wood_Products[1] * substitution.wood.products
+    
+    if (even.aged == FALSE) {
+      data <- merge(data2, data, all = TRUE)
+    }
+    data$Activity <- paste("Thin @ Year", year)
+    
+    return(data)
   }
   
-  
-  # year <- cycle.table$Year[cycle.table$Activity == "Harvest"][1]
-  # 
-  # if(length(cycle.table$Year[cycle.table$Activity == "Harvest"]) > 1) {
-  #   harvest.interval <- cycle.table$Year[cycle.table$Activity == "Harvest"][2] - cycle.table$Year[cycle.table$Activity == "Harvest"][1]
-  # } else {
-  #   harvest.interval <- cycle.table$Year[cycle.table$Activity == "Harvest"][1]
-  # }
-  
-  harvest <- function(year) {
-    if (!is.na(thin.year)){
-      last.mg.ha <-thinned$Let_Grow_Forest_Mg_per_ha[thinned$Year == year]
-    } else {
-      last.mg.ha <- growth_table$Let_Grow_Forest_Mg_per_ha[which(growth_table$Year == year)]
+  harvest <- function(year, even.aged) {
+    if(missing(even.aged)) {
+      even.aged <- TRUE
     }
+    if (even.aged == FALSE) {
+      first.harvest.year <- harvest.cycles[1]
+      last.mg.ha <- growth_table$Let_Grow_Forest_Mg_per_ha[which(growth_table$Year == first.harvest.year)]
+      last.mg.ha2 <-thinned$Let_Grow_Forest_Mg_per_ha[thinned$Year == first.harvest.year] - thinned$Let_Grow_Forest_Mg_per_ha[thinned$Year == (first.harvest.year-20)]
+    } else {
+      previous.activity <- cycle.table$Activity[which(cycle.table$Year == year)-1]
+      if (length(previous.activity) > 0){
+        if (previous.activity == "Thin") {
+          last.mg.ha <-thinned$Let_Grow_Forest_Mg_per_ha[thinned$Year == year]
+          last.mg.ha2 <- last.mg.ha
+        } else {
+          last.mg.ha <- growth$Coefficient_a[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * (1 - exp(-growth$Coefficient_b[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * harvest.cycles[1]))^3
+          last.mg.ha2 <- last.mg.ha
+          year <- year + 1
+        }
+      } else {
+        last.mg.ha <- growth$Coefficient_a[growth$Veg_Type == forest.type & growth$Owner_Type == "All_CMC"] * (1 - exp(-growth$Coefficient_b[growth$Veg_Type == forest.type & growth$Owner_Type == "All_CMC"] * harvest.cycles[1]))^3
+        last.mg.ha2 <- last.mg.ha
+      }
+    }
+    
     data <- growth_table[which(growth_table$Year == year):which(growth_table$Year == max.year),]
     
-    data$Logging_Slash_Left <- last.mg.ha * 0.4 * logging.residue.unused * flows$Logging_Residue_Slash[1:nrow(data)]/100
-    data$Energy_from_logging_residues <- (last.mg.ha  * ((0.4* logging.residue.bioenergy.used)) - (last.mg.ha  * 0.03))
-    data$Energy_from_sawmill_residues <- (last.mg.ha  * ((0.6* sawmill.residue.bioenergy.used)))
-    data$Wood_Products <- last.mg.ha  * (0.6 * sawmill.residue.products.used) * flows$Wood_Products_In_Use[1:nrow(data)]/100
-    data$Landfill <- last.mg.ha  * 0.6  * flows$Permanent_Landfill_Storage[1:nrow(data)]/100
-    data$Energy_from_post_consumer_residues <- last.mg.ha  * 0.6  * flows$Accumulated_Post_Consumer_Energy[1:nrow(data)]/100
-    data$Substitution_Benefits <- NA
-    if (year * 2 < 240) {
-      end <- year * 2
+    data$Logging_Slash_Left <- last.mg.ha2 * 0.4 * logging.residue.unused * flows$Logging_Residue_Slash[1:nrow(data)]/100
+    data$Energy_from_logging_residues <- (last.mg.ha2  * ((0.4* logging.residue.bioenergy.used)) - (last.mg.ha  * 0.03))
+    data$Energy_from_sawmill_residues <- (last.mg.ha2  * ((0.6* sawmill.residue.bioenergy.used)))
+    data$Wood_Products <- last.mg.ha2  * (0.6 * sawmill.residue.products.used) * flows$Wood_Products_In_Use[1:nrow(data)]/100
+    data$Landfill <- last.mg.ha2  * 0.6  * flows$Permanent_Landfill_Storage[1:nrow(data)]/100
+    data$Energy_from_post_consumer_residues <- last.mg.ha2  * 0.6  * flows$Accumulated_Post_Consumer_Energy[1:nrow(data)]/100
+    if (even.aged == TRUE){
+      data$Substitution_Benefits <- NA
+      if (year * 2 < 240) {
+        end <- year * 2
+        data$Substitution_Benefits[1:which(data$Year == end)]  <- data$Wood_Products[1] * substitution.wood.products
+        data$Substitution_Benefits[which(data$Year == (end + 1)):which(data$Year == max.year)]  <- data$Wood_Products[which(data$Year == (end + 1))]
+      } else {
+        end <- 240
+        data$Substitution_Benefits[1:which(data$Year == end)]  <- data$Wood_Products[1] * substitution.wood.products
+        # data$Substitution_Benefits[which(data$Year == end):which(data$Year == max.year)]  <- data$Wood_Products[which(data$Year == end)]
+      }
     } else {
-      end <- 240
+      data$Substitution_Benefits <- data$Wood_Products * substitution.wood.products
     }
-    data$Substitution_Benefits[1:which(data$Year == end)]  <- data$Wood_Products[1] * substitution.wood.products
-    data$Substitution_Benefits[which(data$Year == (end + 1)):which(data$Year == max.year)]  <- data$Wood_Products[which(data$Year == (end + 1))]
+
     
     data$Activity <- paste("Harvest @ Year", year)
     
@@ -241,36 +241,15 @@ create_growth_table <- function(forest.type, thin.year, harvest.year, max.year, 
     return(data)
   }
   
-  harvest1 <- harvest(harvest.year[1])
-  
-  harvest2 <- function(year) {
-    last.mg.ha <- growth$Coefficient_a[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * (1 - exp(-growth$Coefficient_b[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * harvest.year[1]))^3
-    data <- growth_table[which(growth_table$Year == year + 1):which(growth_table$Year == max.year),]
-    data$Logging_Slash_Left<- last.mg.ha * 0.4 * logging.residue.unused * flows$Logging_Residue_Slash[1:nrow(data)]/100
-    data$Energy_from_logging_residues <- (last.mg.ha  * ((0.4* logging.residue.bioenergy.used)) - (last.mg.ha  * 0.03))
-    data$Energy_from_sawmill_residues <- (last.mg.ha  * ((0.6* sawmill.residue.bioenergy.used)))
-    data$Wood_Products <- last.mg.ha  * (0.6 * sawmill.residue.products.used) * flows$Wood_Products_In_Use[1:nrow(data)]/100
-    data$Landfill <- last.mg.ha  * 0.6  * flows$Permanent_Landfill_Storage[1:nrow(data)]/100
-    data$Energy_from_post_consumer_residues <- last.mg.ha  * 0.6  * flows$Accumulated_Post_Consumer_Energy[1:nrow(data)]/100
-    data$Substitution_Benefits <- NA
-    if (year * 2 < 240) {
-      end <- year * 2
-    } else {
-      end <- 240
+  if(!is.na(thin.year)) {
+    thinned <- thin(thin.year[1], even.aged)
+    harvests <- vector(mode="list", length=length(harvest.cycles))
+    for (i in 1:length(harvest.cycles)) {
+      harvests[[i]] <- harvest(harvest.cycles[i], even.aged)
     }
-    data$Substitution_Benefits[1:which(data$Year == end)]  <- data$Wood_Products[1] * substitution.wood.products
-    
-    data$Activity <- paste("Harvest @ Year", year)
-    
-    data$Let_Grow_Forest_Mg_per_ha <- NULL
-    
-    return(data)
-  }
-  harvest2 <- harvest2(harvest.year*2)
-  
-  if (!is.na(thin.year)){
-    final <- merge(thinned, harvest1, all = TRUE)
-    final <- merge(final, harvest2, all = TRUE)
+
+    final <- Reduce(rbind, harvests)
+    final <- merge(thinned, final, all = TRUE)
     final[is.na(final)] <- 0
     
     final2 <- final %>% group_by(Year) %>% summarise(Logging_Slash_Left = sum(Logging_Slash_Left), 
@@ -288,7 +267,12 @@ create_growth_table <- function(forest.type, thin.year, harvest.year, max.year, 
     final2$Let_Grow_Forest_Mg_per_ha[which(final2$Year == 161):which(final2$Year == 240)] <- growth_table$Let_Grow_Forest_Mg_per_ha[which(growth_table$Year == 161):which(growth_table$Year == 240)]
     
   } else {
-    final <- merge(harvest1, harvest2, all = TRUE)
+    harvests <- vector(mode="list", length=length(harvest.cycles))
+    for (i in 1:length(harvest.cycles)) {
+      harvests[[i]] <- harvest(harvest.cycles[i], even.aged)
+    }
+    
+    final <- Reduce(rbind, harvests)
     final[is.na(final)] <- 0
     
     
@@ -303,6 +287,31 @@ create_growth_table <- function(forest.type, thin.year, harvest.year, max.year, 
     final2 <- merge(final2, growth_table, all = TRUE)
   }
   
+  regen.table <- data.frame("Project Year" = -80:160, "Year" = 0:max.year)
+  regen.table$Regenerated_Forest <- NA
+  
+  for (i in 1:length(harvest.cycles)) {
+    if (!is.na(harvest.cycles[i + 1])) {
+      end <- harvest.cycles[i+1] + 1
+    } else {
+      end <- max.year
+    }
+    if (even.aged == FALSE) {
+      if (i < length(harvest.cycles)) {
+      regen.table$Regenerated_Forest[which(regen.table$Year == (harvest.cycles[i])):which(regen.table$Year == (harvest.cycles[i + 1] - 1))] <- final2$Let_Grow_Forest_Mg_per_ha[which(final2$Year == 60):which(final2$Year == 79)]
+      } else {
+        regen.table$Regenerated_Forest[which(regen.table$Year == (harvest.cycles[i])):which(regen.table$Year == (harvest.cycles[i] + 19))] <- final2$Let_Grow_Forest_Mg_per_ha[which(final2$Year == 60):which(final2$Year == 79)]
+        regen.table$Regenerated_Forest[which(regen.table$Year == end)] <- final2$Let_Grow_Forest_Mg_per_ha[which(final2$Year == 80)]
+      }
+    } else {
+      if(i == 1) {
+        regen.table$Regenerated_Forest[which(regen.table$Year == harvest.cycles[i]):which(regen.table$Year == end)] <- growth$Coefficient_a[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * (1 - exp(-growth$Coefficient_b[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * growth_table$Year[1:length(regen.table$Regenerated_Forest[which(regen.table$Year == harvest.cycles[i]):which(regen.table$Year == end)])]))^3
+      } else {
+        regen.table$Regenerated_Forest[which(regen.table$Year == (harvest.cycles[i] + 1)):which(regen.table$Year == end)] <- growth$Coefficient_a[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * (1 - exp(-growth$Coefficient_b[growth$Veg_Type == forest.type & growth$Owner_Type == "Pvt_CMC"] * growth_table$Year[1:length(regen.table$Regenerated_Forest[which(regen.table$Year == (harvest.cycles[i] + 1)):which(regen.table$Year == end)])]))^3
+      }
+    }
+  }
+  
   if (any(grepl("Project.Year", names(final2)))) {
     final2$Project.Year <- NULL
     final3 <- merge(final2, regen.table, by = c("Year"), all = TRUE)
@@ -310,27 +319,46 @@ create_growth_table <- function(forest.type, thin.year, harvest.year, max.year, 
     final3 <- merge(final2, regen.table, by = "Year", all = TRUE)
   }
   final3[is.na(final3)] <- 0
+
   #let.grow.mgC.ha <- data.frame("Scenario" = NA, "Cycles" = NA, "Type" = NA, "MgC/ha" = NA, "MgC/ha/yr" = NA)
   scenario.table <- data.frame("Scenario" =  rep(c("Let Grow", "Managed"), each = 3), "Cycles" = rep(c(1.5, 2, 3), 2))
   scenario.table$MgC.ha <- NA
-  scenario.table$MgC.ha[scenario.table$Scenario == "Let Grow" & scenario.table$Cycles == 1.5] <- sum(final3$Let_Grow_Forest_Mg_per_ha[which(final3$Year == 0):which(final3$Year == harvest.year[1] * 1.5)])
-  scenario.table$MgC.ha[scenario.table$Scenario == "Let Grow" & scenario.table$Cycles == 2] <- sum(final3$Let_Grow_Forest_Mg_per_ha[which(final3$Year == 0):which(final3$Year == harvest.year[1] * 2)])
-  scenario.table$MgC.ha[scenario.table$Scenario == "Let Grow" & scenario.table$Cycles == 3] <- sum(final3$Let_Grow_Forest_Mg_per_ha[which(final3$Year == 0):which(final3$Year == harvest.year[1] * 3)])
-  
   pattern <- c("Substitution_Benefits", "Landfill", "Wood_Products", "Energy_from_post_consumer_residues", "Energy_from_sawmill_residues", "Energy_from_logging_residues", "Regenerated_Forest", "Logging_Slash_Left")
   sum.columns <- which(grepl(paste0(pattern, collapse = "|"), names(final3)))
-  scenario.table$MgC.ha[scenario.table$Scenario == "Managed" & scenario.table$Cycles == 1.5] <- sum(final3[which(final3$Year == 0):which(final3$Year == harvest.year[1] * 1.5), sum.columns]) + sum(final3$Let_Grow_Forest_Mg_per_ha[which(final3$Year == 0):which(final3$Year == harvest.year[1])])
-  scenario.table$MgC.ha[scenario.table$Scenario == "Managed" & scenario.table$Cycles == 2] <- sum(final3[which(final3$Year == 0):which(final3$Year == harvest.year[1] * 2), sum.columns]) + sum(final3$Let_Grow_Forest_Mg_per_ha[which(final3$Year == 0):which(final3$Year == harvest.year[1])])
-  scenario.table$MgC.ha[scenario.table$Scenario == "Managed" & scenario.table$Cycles == 3] <- sum(final3[which(final3$Year == 0):which(final3$Year == harvest.year[1] * 3), sum.columns]) + sum(final3$Let_Grow_Forest_Mg_per_ha[which(final3$Year == 0):which(final3$Year == harvest.year[1])])
   
-  scenario.table$MgC.ha.yr <- scenario.table$MgC.ha/(scenario.table$Cycles*harvest.year)
+  for (i in 1:nrow(scenario.table)) {
+    scenario.table$MgC.ha[scenario.table$Scenario == "Managed" & scenario.table$Cycles == scenario.table$Cycles[i]] <- sum(final3[which(final3$Year == 0):which(final3$Year == harvest.cycles[1] * scenario.table$Cycles[i]), sum.columns]) + sum(final3$Let_Grow_Forest_Mg_per_ha[which(final3$Year == 0):which(final3$Year == harvest.cycles[1])])
+    scenario.table$MgC.ha[scenario.table$Scenario == "Let Grow" & scenario.table$Cycles == scenario.table$Cycles[i]] <- sum(final3$Let_Grow_Forest_Mg_per_ha[which(final3$Year == 0):which(final3$Year == harvest.cycles[1] * scenario.table$Cycles[i])])
+  }
+  
+  scenario.table$MgC.ha.yr <- scenario.table$MgC.ha/(scenario.table$Cycles*harvest.cycles[1])
   
   ratio.table <- data.frame("Cycles" = rep(c(1.5, 2, 3), 1))
   ratio.table$Carbon.Ratio <- round(scenario.table[scenario.table$Scenario == "Managed",3]/scenario.table[scenario.table$Scenario == "Let Grow",3],2)
+  ratio.table$Cycles <- formatC(ratio.table$Cycles, format = "fg", big.mark = ",")
   
   scenario.table$MgC.ha <- formatC(scenario.table$MgC.ha, format = "d", big.mark = ",")
   scenario.table$MgC.ha.yr <- formatC(scenario.table$MgC.ha.yr, format = "d", big.mark = ",")
   scenario.table$Cycles <- formatC(scenario.table$Cycles, format = "fg", big.mark = ",")
+  
+  products.table <- data.frame("Cycles" = rep(c(1.5, 2, 3), 1))
+  
+  for (i in 1:nrow(products.table)) {
+    products.table$Live.Trees.and.Downed.Wood[products.table$Cycles[i]] <- (sum(final3$Let_Grow_Forest_Mg_per_ha[final3$Year <= harvest.year]) + sum(final3$Logging_Slash_Left[final3$Year <= (products.table$Cycles[i] * harvest.year)]) + sum(final3$Regenerated_Forest[final3$Year <= (products.table$Cycles[i] * harvest.year)]))/(harvest.year*products.table$Cycles[i])
+    products.table$Wood.Products[products.table$Cycles[i]] <- sum(final3$Wood_Products[final3$Year <= (products.table$Cycles[i] * harvest.year)])/(harvest.year*products.table$Cycles[i])
+    products.table$Direct.Bioenergy[products.table$Cycles[i]] <- (sum(final3$Energy_from_logging_residues[final3$Year <= (products.table$Cycles[i] * harvest.year)]) + sum(final3$Energy_from_sawmill_residues[final3$Year <= (products.table$Cycles[i] * harvest.year)]) + sum(final3$Energy_from_post_consumer_residues[final3$Year <= (products.table$Cycles[i] * harvest.year)]))/(harvest.year*products.table$Cycles[i])
+    products.table$Landfill.Storage[products.table$Cycles[i]] <- sum(final3$Landfill[final3$Year <= (products.table$Cycles[i] * harvest.year)])/(harvest.year*products.table$Cycles[i])
+    products.table$Building.Products.Substitution[products.table$Cycles[i]] <- sum(final3$Substitution_Benefits[final3$Year <= (products.table$Cycles[i] * harvest.year)])/(harvest.year*products.table$Cycles[i])
+    products.table$Total.Benefits  <- rowSums(products.table[,c(2:6)])
+  }
+  
+  names(products.table) <- c("Cycles", "Live Trees and \n Downed Wood", "Wood Products", "Direct Bioenergy", "Landfill Storage", "Building Products \n Substitution", "Total Benefits")
+  products.table$Cycles <- formatC(products.table$Cycles, format = "fg", big.mark = ",")
+  products.table[,c(2:7)] <- round(products.table[,c(2:7)],0)
+  # 
+  # tt <- ttheme_minimal(base_colour = "black")
+  # 
+  # test <- grid.table(products.table, theme = tt)
   
   final4 <- final3
   final4$Year <- NULL
@@ -363,32 +391,37 @@ create_growth_table <- function(forest.type, thin.year, harvest.year, max.year, 
          title=paste(paste("Climate Benefits of California", forest.type, "Forest:"), "Forest and Products vs Let Grow Forest", sep = "\n")) + 
     custom_theme
   
-  graph
+  #graph
   
   mylist <- vector(mode="list", length=3)
-  mylist[[1]] <- final3
-  mylist[[2]] <- scenario.table
-  mylist[[3]] <- graph
+  mylist[[1]] <- graph
+  mylist[[2]] <- final3
+  mylist[[3]] <- scenario.table
   mylist[[4]] <- ratio.table
+  mylist[[5]] <- products.table
   
   return(mylist)
 }
 
-
-
-# MIX_CON_EVEN_T40_H80_U00 <- create_growth_table("Mixed Conifer", 40, 80, logging.residue.bioenergy.used = 0, logging.residue.products.used = 0, logging.residue.unused = 1)
+# ggsave("test.png", plot = MIX_CON_UNEVEN[[1]], device = "png", width = 12, height = 6)
 # 
-# MIX_CON_EVEN_T40_H80_U25 <- create_growth_table("Mixed Conifer", 40, 80, logging.residue.bioenergy.used = 0.25, logging.residue.products.used = 0, logging.residue.unused = 0.75)
+# MIX_CON_UNEVEN <- create_growth_table(forest.type = "Mixed Conifer", even.aged = FALSE, thin.year = 40, harvest.year = 80, max.year = 240)
+# test <- MIX_CON_UNEVEN [[2]]
 # 
-# MIX_CON_EVEN_T40_H80_U75 <- create_growth_table("Mixed Conifer", 40, 80)
+# MIX_CON_EVEN_T40_H80_U00 <- create_growth_table("Mixed Conifer", TRUE, 40, 80, logging.residue.bioenergy.used = 0, logging.residue.products.used = 0, logging.residue.unused = 1)
+# test <- MIX_CON_EVEN_T40_H80_U00[[2]]
 # 
-# MIX_CON_EVEN_T00_H80_U75 <- create_growth_table("Mixed Conifer", NA, 80)
+# MIX_CON_EVEN_T40_H80_U25 <- create_growth_table("Mixed Conifer", TRUE, 40, 80, logging.residue.bioenergy.used = 0.25, logging.residue.products.used = 0, logging.residue.unused = 0.75)
 # 
-# PP_EVEN_T40_H80_U00 <- create_growth_table("Ponderosa Pine", 40, 80, logging.residue.bioenergy.used = 0, logging.residue.products.used = 0, logging.residue.unused = 1)
+# MIX_CON_EVEN_T40_H80_U75 <- create_growth_table("Mixed Conifer", TRUE, 40, 80)
 # 
-# PP_EVEN_T40_H80_U25 <- create_growth_table("Ponderosa Pine", 40, 80, logging.residue.bioenergy.used = 0.25, logging.residue.products.used = 0, logging.residue.unused = 0.75)
+# MIX_CON_EVEN_T00_H80_U75 <- create_growth_table("Mixed Conifer", TRUE, NA, 80)
 # 
-# PP_EVEN_T40_H80_U75 <- create_growth_table("Ponderosa Pine", 40, 80)
+# PP_EVEN_T40_H80_U00 <- create_growth_table("Ponderosa Pine", TRUE, 40, 80, logging.residue.bioenergy.used = 0, logging.residue.products.used = 0, logging.residue.unused = 1)
+# 
+# PP_EVEN_T40_H80_U25 <- create_growth_table("Ponderosa Pine", TRUE, 40, 80, logging.residue.bioenergy.used = 0.25, logging.residue.products.used = 0, logging.residue.unused = 0.75)
+# 
+# PP_EVEN_T40_H80_U75 <- create_growth_table("Ponderosa Pine",TRUE, 40, 80)
 # 
 # PP_EVEN_T00_H80_U75 <- create_growth_table("Ponderosa Pine", NA, 80)
 # 
@@ -412,13 +445,35 @@ ui <- fluidPage(
              tabPanel("Graph", plotOutput(outputId = "graph")), 
              tabPanel("Table", 
                       fluidRow(
+                        column(1,
+                               ""
+                        ),
                         column(6,
                                h4("Carbon benefits of treatment over three harvest cycles"), 
                                tableOutput(outputId = "scenario.table")
                         ),
-                        column(6,
+                        column(1,
+                               ""
+                        ),
+                        column(3,
                                h4("Managed Forest to Let Grow Carbon Ratio"), 
-                               tableOutput(outputId = "ratio.table"))
+                               tableOutput(outputId = "ratio.table")
+                        ),
+                        column(1,
+                               ""
+                        )
+                      ),
+                      fluidRow(
+                        column(1,
+                               ""
+                        ),
+                        column(10,
+                               h4("Total Managed Forest Benefits - Yearly Average (MgC/ha/yr)"), 
+                               tableOutput(outputId = "products.table")
+                        ),
+                        column(1,
+                               ""
+                        )
                       )
              )
            )
@@ -430,7 +485,9 @@ ui <- fluidPage(
            wellPanel (
              h4("Treatment Specifications"),
              selectInput("forest.type", "Forest Type Selection:", c("Mixed Conifer", "Ponderosa Pine", "Douglas-fir", "Redwood"), selected = "Mixed Conifer"),
-             checkboxInput("thin", "Thin at Year 40?", value = TRUE),
+             helpText("All treatments assume harvest at year 80. Uneven-aged assumes thin at year 40, harvest at year 80, re-enter every 20 years. Even-aged assumes harvest at years 80 and 160."),
+             checkboxInput("even.aged", "Even-aged?", value = TRUE),
+             checkboxInput("thin", "Thin at Year 40 (for even-aged only)?", value = TRUE),
              numericInput("thin.pct.total.live", "Thin proportion of total live biomass", min = 0, max = 1, value = 0.4, step = 0.1)
            )
     ),
@@ -475,99 +532,116 @@ ui <- fluidPage(
            )
     )
     
-  )
+  ),
   
-  # fluidRow(
-  #   column(12,
-  #          wellPanel (
-  #            submitButton("Update")
-  #          )
-  #          )
-  # )
+  fluidRow(
+    column(3,
+           ""
+    ),
+    column(3,align="center",
+           wellPanel (
+             downloadButton('downloadData', 'Download Data')
+           )
+           ),
+    column(3, align="center",
+           wellPanel (
+             downloadButton('downloadPlot', 'Download Plot')
+           )
+    ),
+    column(3,
+           ""
+    )
+  )
 )
 
 server <- function(input, output){
-  
-  output$graph <- renderPlot({
+  dataInput <- reactive({    
     if(input$thin == TRUE) {
       thin.year <- 40
     } else {
       thin.year <- NA
     }
+    create_growth_table(forest.type = input$forest.type, 
+                              even.aged = input$even.aged,
+                              thin.year = thin.year, 
+                              harvest.year = 80,
+                              max.year = 240,
+                              thin.pct.total.live = input$thin.pct.total.live, 
+                              logging.residue.bioenergy.used = input$logging.residue.bioenergy.used, 
+                              logging.residue.products.used = input$logging.residue.products.used,
+                              logging.residue.unused = input$logging.residue.unused,
+                              thinning.residue.bioenergy.used = input$thinning.residue.bioenergy.used, 
+                              thinning.residue.products.used = input$thinning.residue.products.used,
+                              thinning.residue.unused = input$thinning.residue.unused,
+                              sawmill.residue.bioenergy.used = input$sawmill.residue.bioenergy.used,
+                              sawmill.residue.products.used = input$sawmill.residue.products.used,
+                              sawmill.residue.unused = input$sawmill.residue.unused,
+                              substitution.wood.products = input$substitution,
+                              substitution.unused = 1-input$substitution)
     
-    data <- create_growth_table(forest.type = input$forest.type, 
-                                thin.year = thin.year, 
-                                harvest.year = 80,
-                                max.year = 240,
-                                thin.pct.total.live = input$thin.pct.total.live, 
-                                logging.residue.bioenergy.used = input$logging.residue.bioenergy.used, 
-                                logging.residue.products.used = input$logging.residue.products.used,
-                                logging.residue.unused = input$logging.residue.unused,
-                                thinning.residue.bioenergy.used = input$thinning.residue.bioenergy.used, 
-                                thinning.residue.products.used = input$thinning.residue.products.used,
-                                thinning.residue.unused = input$thinning.residue.unused,
-                                sawmill.residue.bioenergy.used = input$sawmill.residue.bioenergy.used,
-                                sawmill.residue.products.used = input$sawmill.residue.products.used,
-                                sawmill.residue.unused = input$sawmill.residue.unused,
-                                substitution.wood.products = input$substitution,
-                                substitution.unused = 1-input$substitution)
+  })
+  
+  output$graph <- renderPlot({
+
     
-    data[[3]]
+  dataInput()[[1]]
   })
   
   output$scenario.table <- renderTable({
-    if(input$thin == TRUE) {
-      thin.year <- 40
-    } else {
-      thin.year <- NA
-    }
-    
-    data <- create_growth_table(forest.type = input$forest.type, 
-                                thin.year = thin.year, 
-                                harvest.year = 80,
-                                max.year = 240,
-                                thin.pct.total.live = input$thin.pct.total.live, 
-                                logging.residue.bioenergy.used = input$logging.residue.bioenergy.used, 
-                                logging.residue.products.used = input$logging.residue.products.used,
-                                logging.residue.unused = input$logging.residue.unused,
-                                thinning.residue.bioenergy.used = input$thinning.residue.bioenergy.used, 
-                                thinning.residue.products.used = input$thinning.residue.products.used,
-                                thinning.residue.unused = input$thinning.residue.unused,
-                                sawmill.residue.bioenergy.used = input$sawmill.residue.bioenergy.used,
-                                sawmill.residue.products.used = input$sawmill.residue.products.used,
-                                sawmill.residue.unused = input$sawmill.residue.unused,
-                                substitution.wood.products = input$substitution,
-                                substitution.unused = 1-input$substitution)
-    
-    data[[2]]
-  })
+  
+    dataInput()[[3]]
+  },hover = TRUE, spacing = 'xs',  align = 'c', width = '100%', digits = 0)
   
   output$ratio.table <- renderTable({
-    if(input$thin == TRUE) {
-      thin.year <- 40
-    } else {
-      thin.year <- NA
+    dataInput()[[4]]
+  }, hover = TRUE, spacing = 'xs',  align = 'c',width = '100%',digits = 2)
+  
+  output$products.table <- renderTable({
+    dataInput()[[5]]
+  },hover = TRUE, spacing = 'xs',  align = 'c', width = '100%',digits = 0)
+  
+  output$downloadData <- downloadHandler(
+    
+    filename = function(){
+      paste0(input$forest.type,".zip")
+      
+    },
+
+    content = function(file) {
+      # write.csv(dataInput()[[2]], file, row.names = FALSE)
+      owd <- setwd(tempdir())
+      on.exit(setwd(owd))
+      files <- NULL;
+      
+      #loop through the sheets
+      for (i in 2:length(dataInput())){
+        if(input$thin == TRUE) {
+          thin.year <- 40
+        } else {
+          thin.year <- NA
+        }
+        
+        harvest.year <- 80
+        #write each sheet to a csv file, save the name
+        name.list <- c("","all.benefits", "scenario.table", "ratio.table", "products.table")
+        fileName <- paste(input$forest.type, "_T", thin.year, "_H", harvest.year,"_U", paste(input$logging.residue.bioenergy.used*100), "_",name.list[i],".csv",sep = "")
+        write.csv(dataInput()[[i]],fileName,row.names = F)
+        files <- c(fileName,files)
+      }
+      #create the zip file
+      zip(file,files)
     }
+  )
     
-    data <- create_growth_table(forest.type = input$forest.type, 
-                                thin.year = thin.year, 
-                                harvest.year = 80,
-                                max.year = 240,
-                                thin.pct.total.live = input$thin.pct.total.live, 
-                                logging.residue.bioenergy.used = input$logging.residue.bioenergy.used, 
-                                logging.residue.products.used = input$logging.residue.products.used,
-                                logging.residue.unused = input$logging.residue.unused,
-                                thinning.residue.bioenergy.used = input$thinning.residue.bioenergy.used, 
-                                thinning.residue.products.used = input$thinning.residue.products.used,
-                                thinning.residue.unused = input$thinning.residue.unused,
-                                sawmill.residue.bioenergy.used = input$sawmill.residue.bioenergy.used,
-                                sawmill.residue.products.used = input$sawmill.residue.products.used,
-                                sawmill.residue.unused = input$sawmill.residue.unused,
-                                substitution.wood.products = input$substitution,
-                                substitution.unused = 1-input$substitution)
-    
-    data[[4]]
-  })
+    output$downloadPlot <- downloadHandler(
+      
+      filename = function() { paste(input$forest.type, "_T", thin.year, "_H", harvest.year,"_U", paste(input$logging.residue.bioenergy.used*100), '.png', sep='') },
+      content = function(file) {
+        device <- function(..., width, height) grDevices::png(..., width = width, height = height, res = 300, units = "in")
+        ggsave(file, plot = dataInput()[[1]], device = device, width = 12, height = 6)
+      }
+
+  )
 }
 
 
