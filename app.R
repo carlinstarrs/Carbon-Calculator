@@ -64,12 +64,6 @@ for (i in 2:nrow(flows)) {
 flows$Hayes_2012[flows$Hayes_2012 < 0] <- 0
 
 #Grow Stand
-
-thin.year <- 40
-harvest.year <- 80
-max.year <- 240
-forest.type <-  "Mixed Conifer"
-
 create_growth_table <- function(forest.type, even.aged, thin.year, harvest.year, max.year, thin.pct.total.live, 
                                 logging.residue.bioenergy.used, logging.residue.products.used, logging.residue.unused,
                                 thinning.residue.bioenergy.used, thinning.residue.products.used, thinning.residue.unused, 
@@ -505,7 +499,7 @@ ui <- fluidPage(
   fluidRow(
     column(4,
            wellPanel (
-             h4("Sawmill Residue Propotions"),
+             h4("Sawmill Residue Proportions"),
              helpText("Default 0.24 used for energy, 0.75 into products, 0.01 waste"),
              numericInput("sawmill.residue.bioenergy.used", "Bioenergy", min = 0, max = 1, value = 0.24, step = 0.1),
              numericInput("sawmill.residue.products.used", "Products", min = 0, max = 1, value = 0.75, step = 0.1),
@@ -515,7 +509,7 @@ ui <- fluidPage(
     
     column(4,
            wellPanel(
-             h4("Thinning Residue Propotions"),
+             h4("Thinning Residue Proportions"),
              helpText("Based on partial thinnings (72% chips, 28% sawlogs) in Stewart and Nakamura (2012)"),
              numericInput("thinning.residue.bioenergy.used", "Bioenergy", min = 0, max = 1, value = 0.72, step = 0.1),
              numericInput("thinning.residue.products.used", "Products", min = 0, max = 1, value = 0.28, step = 0.1),
@@ -524,7 +518,7 @@ ui <- fluidPage(
     ),
     column(4,
            wellPanel (
-             h4("Logging Residue Propotions"),
+             h4("Logging Residue Proportions"),
              helpText("Default 0.75 used, 0.25 unused logging residues left to decompose on site."),
              numericInput("logging.residue.bioenergy.used", "Bioenergy", min = 0, max = 1, value = 0.75, step = 0.1),
              numericInput("logging.residue.products.used", "Products", min = 0, max = 1, value = 0, step = 0.1),
